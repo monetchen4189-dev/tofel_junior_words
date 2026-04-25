@@ -595,8 +595,22 @@ const App = {
         document.getElementById('detail-meaning').innerHTML = `<span style="color:#8b5cf6;font-weight:600">${word.pos}</span> ${word.meaning}`;
         document.getElementById('detail-collocation').innerHTML = word.collocation.split(' / ').map(c => `<span style="display:inline-block;background:#ede9fe;color:#6366f1;padding:3px 10px;border-radius:8px;margin:3px 2px;font-size:0.95rem">${c}</span>`).join('');
         document.getElementById('detail-grammar').innerHTML = word.grammar;
-        document.getElementById('detail-example-en').innerHTML = `<span style="color:#6366f1;font-weight:600">${word.word}</span>` + word.example_en.slice(word.word.length);
-        document.getElementById('detail-example-cn').textContent = word.example_cn;
+        
+        if (word.examples && word.examples.length > 0) {
+            const examplesHtml = word.examples.map((ex, idx) => {
+                const highlightedEn = ex.en.replace(new RegExp(`\\b${word.word}\\b`, 'gi'), match => `<span style="color:#6366f1;font-weight:600">${match}</span>`);
+                const meaningLabel = ex.meaning ? `<span style="color:#8b5cf6;font-size:0.85rem;margin-right:8px;">【${ex.meaning}】</span>` : '';
+                return `<div style="margin-bottom:12px;padding:10px;background:#f8fafc;border-radius:8px;border-left:3px solid #6366f1;">
+                    <div style="margin-bottom:4px;">${meaningLabel}${highlightedEn}</div>
+                    <div style="color:#64748b;font-size:0.9rem;">${ex.cn}</div>
+                </div>`;
+            }).join('');
+            document.getElementById('detail-example-en').innerHTML = examplesHtml;
+            document.getElementById('detail-example-cn').innerHTML = '';
+        } else {
+            document.getElementById('detail-example-en').innerHTML = `<span style="color:#6366f1;font-weight:600">${word.word}</span>` + (word.example_en ? word.example_en.slice(word.word.length) : '');
+            document.getElementById('detail-example-cn').textContent = word.example_cn || '';
+        }
 
         if (!this.state.learnedWords.includes(word.word)) {
             this.state.learnedWords.push(word.word);

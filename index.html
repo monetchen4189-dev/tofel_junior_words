@@ -115,14 +115,44 @@
                     <div class="setting-item"><label>发音语速</label><div class="setting-control"><input type="range" id="setting-rate" min="0.5" max="1.5" step="0.1" value="0.9" class="setting-range"><span class="setting-value" id="setting-rate-value">0.9x</span></div></div>
                     <div class="setting-item setting-item-full">
                         <div class="setting-toggle-row">
-                            <label>艾宾浩斯记忆法</label>
+                            <div class="ebbinghaus-title">
+                                <span class="ebbinghaus-icon">🧠</span>
+                                <label>艾宾浩斯记忆法</label>
+                            </div>
                             <label class="toggle-switch"><input type="checkbox" id="setting-ebbinghaus"><span class="toggle-slider"></span></label>
                         </div>
-                        <p class="setting-desc">根据遗忘曲线智能安排复习，每天包含新词+需复习的旧词</p>
+                        <p class="setting-desc">根据遗忘曲线智能安排复习，答对升级间隔，答错重新开始</p>
                         <div id="ebbinghaus-info" class="ebbinghaus-info hidden">
-                            <p>📅 今日新词：<strong id="ebbinghaus-new">0</strong> 个</p>
-                            <p>🔄 今日复习：<strong id="ebbinghaus-review">0</strong> 个</p>
-                            <p>📝 今日总计：<strong id="ebbinghaus-total">0</strong> 个</p>
+                            <div class="ebbinghaus-curve">
+                                <div class="curve-label">复习间隔</div>
+                                <div class="curve-steps">
+                                    <div class="curve-step"><span class="curve-day">1天</span><span class="curve-dot"></span></div>
+                                    <div class="curve-line"></div>
+                                    <div class="curve-step"><span class="curve-day">2天</span><span class="curve-dot"></span></div>
+                                    <div class="curve-line"></div>
+                                    <div class="curve-step"><span class="curve-day">4天</span><span class="curve-dot"></span></div>
+                                    <div class="curve-line"></div>
+                                    <div class="curve-step"><span class="curve-day">7天</span><span class="curve-dot"></span></div>
+                                    <div class="curve-line"></div>
+                                    <div class="curve-step"><span class="curve-day">15天</span><span class="curve-dot"></span></div>
+                                    <div class="curve-line"></div>
+                                    <div class="curve-step"><span class="curve-day">30天</span><span class="curve-dot curve-dot-final"></span></div>
+                                </div>
+                            </div>
+                            <div class="ebbinghaus-today">
+                                <div class="ebbinghaus-stat">
+                                    <span class="ebbinghaus-stat-icon">🆕</span>
+                                    <div><span class="ebbinghaus-stat-value" id="ebbinghaus-new">0</span><span class="ebbinghaus-stat-label">新词</span></div>
+                                </div>
+                                <div class="ebbinghaus-stat">
+                                    <span class="ebbinghaus-stat-icon">🔄</span>
+                                    <div><span class="ebbinghaus-stat-value" id="ebbinghaus-review">0</span><span class="ebbinghaus-stat-label">复习</span></div>
+                                </div>
+                                <div class="ebbinghaus-stat">
+                                    <span class="ebbinghaus-stat-icon">📝</span>
+                                    <div><span class="ebbinghaus-stat-value" id="ebbinghaus-total">0</span><span class="ebbinghaus-stat-label">总计</span></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div class="setting-actions"><button class="btn-danger" id="btn-reset">重置学习进度</button></div>

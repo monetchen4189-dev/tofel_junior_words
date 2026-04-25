@@ -189,6 +189,10 @@ const App = {
         document.getElementById('setting-mode').addEventListener('change', (e) => {
             this.state.mode = e.target.value;
             this.saveData();
+            const sessionEl = document.getElementById('learn-session');
+            if (!sessionEl.classList.contains('hidden')) {
+                this.showCurrentWord();
+            }
         });
         document.getElementById('setting-lang').addEventListener('change', (e) => {
             this.state.lang = e.target.value;
@@ -609,8 +613,17 @@ const App = {
         this.speakWord();
     },
 
-    speakWord() {
-        const word = this.state.sessionWords[this.state.currentWordIndex].word;
+    speakWord(wordOverride) {
+        const word = wordOverride || this.state.sessionWords[this.state.currentWordIndex].word;
+        const audio = new Audio();
+        audio.src = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(word)}&tl=en&client=tw-ob`;
+        audio.playbackRate = this.state.rate;
+        audio.play().catch(() => {
+            this.speakWordFallback(word);
+        });
+    },
+
+    speakWordFallback(word) {
         const utterance = new SpeechSynthesisUtterance(word);
         utterance.lang = 'en-US';
         utterance.rate = this.state.rate;

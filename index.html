@@ -28,20 +28,25 @@
                         <h2>今日打卡</h2>
                         <p class="today-info">今日目标：<strong id="today-target">10</strong> 个单词</p>
                         <p class="today-info">今日已学：<strong id="today-done">0</strong> 个</p>
+                        <div id="today-review-info" class="today-info hidden">今日复习：<strong id="today-review">0</strong> 个</div>
                         <div class="progress-bar-container"><div class="progress-bar" id="today-progress" style="width:0%"></div></div>
                         <button class="btn-primary btn-large" id="btn-start-learn">开始学习</button>
                     </div>
                 </div>
                 <div id="learn-session" class="learn-session hidden">
-                    <div class="session-progress"><span id="session-current">1</span> / <span id="session-total">10</span></div>
+                    <div class="session-progress">
+                        <span id="session-current">1</span> / <span id="session-total">10</span>
+                        <span id="session-word-type" class="word-type-badge"></span>
+                    </div>
                     <div id="step-meaning" class="step active">
                         <div class="word-card">
                             <div class="word-chinese" id="word-chinese"></div>
                             <div class="word-pos" id="word-pos"></div>
-                            <p class="step-hint">请大声读出这个单词的英文发音</p>
-                            <button class="btn-primary btn-mic" id="btn-speak"><span class="mic-icon">🎤</span> 按住说话</button>
+                            <p class="step-hint" id="step-meaning-hint">请大声读出这个单词的英文发音</p>
+                            <button class="btn-primary btn-mic" id="btn-speak"><span class="mic-icon">🎤</span> 点击说话</button>
                             <div id="speech-result" class="speech-result"></div>
                             <button class="btn-secondary hidden" id="btn-next-step">下一步，拼写单词 →</button>
+                            <button class="btn-secondary hidden" id="btn-skip-speech">跳过语音，直接拼写 →</button>
                         </div>
                     </div>
                     <div id="step-spell" class="step">
@@ -105,8 +110,21 @@
                 <div class="settings-container">
                     <h2>⚙️ 设置</h2>
                     <div class="setting-item"><label>每日学习单词数</label><div class="setting-control"><button class="btn-adjust" id="btn-decrease">−</button><span class="setting-value" id="setting-daily-count">10</span><button class="btn-adjust" id="btn-increase">+</button></div></div>
+                    <div class="setting-item"><label>打卡模式</label><div class="setting-control"><select id="setting-mode" class="setting-select"><option value="both">语音+拼写</option><option value="speech">仅语音</option><option value="spell">仅拼写</option></select></div></div>
                     <div class="setting-item"><label>语音识别语言</label><div class="setting-control"><select id="setting-lang" class="setting-select"><option value="en-US">英语 (美式)</option><option value="en-GB">英语 (英式)</option></select></div></div>
-                    <div class="setting-item"><label>发音语速</label><div class="setting-control"><input type="range" id="setting-rate" min="0.5" max="1.5" step="0.1" value="0.8" class="setting-range"><span class="setting-value" id="setting-rate-value">0.8x</span></div></div>
+                    <div class="setting-item"><label>发音语速</label><div class="setting-control"><input type="range" id="setting-rate" min="0.5" max="1.5" step="0.1" value="0.9" class="setting-range"><span class="setting-value" id="setting-rate-value">0.9x</span></div></div>
+                    <div class="setting-item setting-item-full">
+                        <div class="setting-toggle-row">
+                            <label>艾宾浩斯记忆法</label>
+                            <label class="toggle-switch"><input type="checkbox" id="setting-ebbinghaus"><span class="toggle-slider"></span></label>
+                        </div>
+                        <p class="setting-desc">根据遗忘曲线智能安排复习，每天包含新词+需复习的旧词</p>
+                        <div id="ebbinghaus-info" class="ebbinghaus-info hidden">
+                            <p>📅 今日新词：<strong id="ebbinghaus-new">0</strong> 个</p>
+                            <p>🔄 今日复习：<strong id="ebbinghaus-review">0</strong> 个</p>
+                            <p>📝 今日总计：<strong id="ebbinghaus-total">0</strong> 个</p>
+                        </div>
+                    </div>
                     <div class="setting-actions"><button class="btn-danger" id="btn-reset">重置学习进度</button></div>
                 </div>
             </section>

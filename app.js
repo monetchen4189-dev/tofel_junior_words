@@ -1,17 +1,29 @@
 const App = {
+    EBINGHAUS_INTERVALS: [1, 2, 4, 7, 15, 30],
+
     state: {
         dailyCount: 10,
+        mode: 'both',
         lang: 'en-US',
         rate: 0.9,
+        ebbinghaus: false,
         currentWordIndex: 0,
         sessionWords: [],
+        sessionWordTypes: [],
         sessionCorrect: 0,
+        sessionTotal: 0,
         sessionStartTime: null,
         speechCorrect: false,
-        spellCorrect: false,
+        spellAttempts: 0,
         hintUsed: false,
         recognition: null,
-        isRecording: false
+        isRecording: false,
+        speechTimeout: null,
+        learnedWords: [],
+        dailyLog: {},
+        totalCorrect: 0,
+        totalAttempts: 0,
+        wordRecords: {}
     },
 
     init() {
@@ -29,29 +41,30 @@ const App = {
         if (saved) {
             const data = JSON.parse(saved);
             this.state.dailyCount = data.dailyCount || 10;
+            this.state.mode = data.mode || 'both';
             this.state.lang = data.lang || 'en-US';
-            this.state.rate = data.rate || 0.8;
+            this.state.rate = data.rate || 0.9;
+            this.state.ebbinghaus = data.ebbinghaus || false;
             this.state.learnedWords = data.learnedWords || [];
             this.state.dailyLog = data.dailyLog || {};
             this.state.totalCorrect = data.totalCorrect || 0;
             this.state.totalAttempts = data.totalAttempts || 0;
-        } else {
-            this.state.learnedWords = [];
-            this.state.dailyLog = {};
-            this.state.totalCorrect = 0;
-            this.state.totalAttempts = 0;
+            this.state.wordRecords = data.wordRecords || {};
         }
     },
 
     saveData() {
         localStorage.setItem('toefl_junior_data', JSON.stringify({
             dailyCount: this.state.dailyCount,
+            mode: this.state.mode,
             lang: this.state.lang,
             rate: this.state.rate,
+            ebbinghaus: this.state.ebbinghaus,
             learnedWords: this.state.learnedWords,
             dailyLog: this.state.dailyLog,
             totalCorrect: this.state.totalCorrect,
-            totalAttempts: this.state.totalAttempts
+            totalAttempts: this.state.totalAttempts,
+            wordRecords: this.state.wordRecords
         }));
     },
 
@@ -96,16 +109,71 @@ const App = {
         return Math.round(total);
     },
 
+    getEbbinghausReviewWords() {
+        const today = new Date();
+        const reviewWords = [];
+        for (const [word, record] of Object.entries(this.state.wordRecords)) {
+            if (!record.learnDate) continue;
+            const learnDate = new Date(record.learnDate);
+            const nextReview = record.nextReview;
+            if (nextReview && new Date(nextReview) <= today) {
+                const wordData = WORDS.find(w => w.word === word);
+                if (wordData) reviewWords.push(wordData);
+            }
+        }
+        return reviewWords;
+    },
+
+    getEbbinghausNewCount() {
+        if (!this.state.ebbinghaus) return this.state.dailyCount;
+        const reviewWords = this.getEbbinghausReviewWords();
+        const reviewCount = Math.min(reviewWords.length, Math.floor(this.state.dailyCount * 0.4));
+        return this.state.dailyCount - reviewCount;
+    },
+
+    getEbbinghausReviewCount() {
+        if (!this.state.ebbinghaus) return 0;
+        const reviewWords = this.getEbbinghausReviewWords();
+        return Math.min(reviewWords.length, Math.floor(this.state.dailyCount * 0.4));
+    },
+
+    updateWordRecord(word, isCorrect) {
+        if (!this.state.wordRecords[word]) {
+            this.state.wordRecords[word] = {
+                learnDate: this.getTodayKey(),
+                reviewCount: 0,
+                nextReview: null,
+                level: 0
+            };
+        }
+        const record = this.state.wordRecords[word];
+        if (isCorrect) {
+            record.reviewCount++;
+            record.level = Math.min(record.level + 1, this.EBINGHAUS_INTERVALS.length - 1);
+            const days = this.EBINGHAUS_INTERVALS[record.level];
+            const next = new Date();
+            next.setDate(next.getDate() + days);
+            record.nextReview = next.toISOString().split('T')[0];
+        } else {
+            record.level = 0;
+            const next = new Date();
+            next.setDate(next.getDate() + 1);
+            record.nextReview = next.toISOString().split('T')[0];
+        }
+        this.saveData();
+    },
+
     bindEvents() {
         document.querySelectorAll('.nav-btn').forEach(btn => {
             btn.addEventListener('click', () => this.switchPage(btn.dataset.page));
         });
 
         document.getElementById('btn-start-learn').addEventListener('click', () => this.startSession());
-        document.getElementById('btn-speak').addEventListener('mousedown', () => this.startSpeech());
-        document.getElementById('btn-speak').addEventListener('mouseup', () => this.stopSpeech());
-        document.getElementById('btn-speak').addEventListener('touchstart', (e) => { e.preventDefault(); this.startSpeech(); });
-        document.getElementById('btn-speak').addEventListener('touchend', () => this.stopSpeech());
+
+        const btnSpeak = document.getElementById('btn-speak');
+        btnSpeak.addEventListener('click', () => this.toggleSpeech());
+
+        document.getElementById('btn-skip-speech').addEventListener('click', () => this.goToSpellStep());
         document.getElementById('btn-next-step').addEventListener('click', () => this.goToSpellStep());
         document.getElementById('btn-check-spell').addEventListener('click', () => this.checkSpelling());
         document.getElementById('spell-input').addEventListener('keydown', (e) => {
@@ -118,6 +186,10 @@ const App = {
 
         document.getElementById('btn-decrease').addEventListener('click', () => this.adjustDailyCount(-1));
         document.getElementById('btn-increase').addEventListener('click', () => this.adjustDailyCount(1));
+        document.getElementById('setting-mode').addEventListener('change', (e) => {
+            this.state.mode = e.target.value;
+            this.saveData();
+        });
         document.getElementById('setting-lang').addEventListener('change', (e) => {
             this.state.lang = e.target.value;
             this.saveData();
@@ -126,6 +198,12 @@ const App = {
             this.state.rate = parseFloat(e.target.value);
             document.getElementById('setting-rate-value').textContent = this.state.rate + 'x';
             this.saveData();
+        });
+        document.getElementById('setting-ebbinghaus').addEventListener('change', (e) => {
+            this.state.ebbinghaus = e.target.checked;
+            this.saveData();
+            this.updateEbbinghausInfo();
+            this.updateUI();
         });
         document.getElementById('btn-reset').addEventListener('click', () => {
             if (confirm('确定要重置所有学习进度吗？此操作不可恢复！')) {
@@ -150,19 +228,63 @@ const App = {
         document.getElementById('total-time').textContent = this.getTotalTime();
 
         const todayLog = this.getTodayLog();
-        document.getElementById('today-target').textContent = this.state.dailyCount;
+        const totalTarget = this.state.ebbinghaus
+            ? this.state.dailyCount
+            : this.state.dailyCount;
+        document.getElementById('today-target').textContent = totalTarget;
         document.getElementById('today-done').textContent = todayLog.words;
-        const pct = Math.min(100, Math.round((todayLog.words / this.state.dailyCount) * 100));
+
+        const reviewInfo = document.getElementById('today-review-info');
+        if (this.state.ebbinghaus) {
+            const reviewCount = this.getEbbinghausReviewCount();
+            document.getElementById('today-review').textContent = reviewCount;
+            reviewInfo.classList.remove('hidden');
+        } else {
+            reviewInfo.classList.add('hidden');
+        }
+
+        const pct = Math.min(100, Math.round((todayLog.words / totalTarget) * 100));
         document.getElementById('today-progress').style.width = pct + '%';
     },
 
     startSession() {
-        const unlearned = WORDS.filter(w => !this.state.learnedWords.includes(w.word));
-        const pool = unlearned.length > 0 ? unlearned : WORDS;
-        const shuffled = [...pool].sort(() => Math.random() - 0.5);
-        this.state.sessionWords = shuffled.slice(0, this.state.dailyCount);
+        this.state.sessionWords = [];
+        this.state.sessionWordTypes = [];
+
+        if (this.state.ebbinghaus) {
+            const reviewPool = this.getEbbinghausReviewWords();
+            const shuffledReview = [...reviewPool].sort(() => Math.random() - 0.5);
+            const reviewCount = this.getEbbinghausReviewCount();
+            const newCount = this.state.dailyCount - reviewCount;
+
+            shuffledReview.slice(0, reviewCount).forEach(w => {
+                this.state.sessionWords.push(w);
+                this.state.sessionWordTypes.push('review');
+            });
+
+            const unlearned = WORDS.filter(w => !this.state.learnedWords.includes(w.word) && !this.state.sessionWords.find(sw => sw.word === w.word));
+            const pool = unlearned.length > 0 ? unlearned : WORDS.filter(w => !this.state.sessionWords.find(sw => sw.word === w.word));
+            const shuffledNew = [...pool].sort(() => Math.random() - 0.5);
+            shuffledNew.slice(0, newCount).forEach(w => {
+                this.state.sessionWords.push(w);
+                this.state.sessionWordTypes.push('new');
+            });
+        } else {
+            const unlearned = WORDS.filter(w => !this.state.learnedWords.includes(w.word));
+            const pool = unlearned.length > 0 ? unlearned : WORDS;
+            const shuffled = [...pool].sort(() => Math.random() - 0.5);
+            this.state.sessionWords = shuffled.slice(0, this.state.dailyCount);
+            this.state.sessionWordTypes = this.state.sessionWords.map(() => 'new');
+        }
+
+        if (this.state.sessionWords.length === 0) {
+            alert('暂无需要学习的单词！');
+            return;
+        }
+
         this.state.currentWordIndex = 0;
         this.state.sessionCorrect = 0;
+        this.state.sessionTotal = 0;
         this.state.sessionStartTime = Date.now();
 
         document.getElementById('learn-start').classList.add('hidden');
@@ -174,12 +296,22 @@ const App = {
 
     showCurrentWord() {
         const word = this.state.sessionWords[this.state.currentWordIndex];
+        const wordType = this.state.sessionWordTypes[this.state.currentWordIndex];
         this.state.speechCorrect = false;
-        this.state.spellCorrect = false;
+        this.state.spellAttempts = 0;
         this.state.hintUsed = false;
 
         document.getElementById('session-current').textContent = this.state.currentWordIndex + 1;
         document.getElementById('session-total').textContent = this.state.sessionWords.length;
+
+        const badge = document.getElementById('session-word-type');
+        if (this.state.ebbinghaus) {
+            badge.textContent = wordType === 'new' ? '新词' : '复习';
+            badge.className = 'word-type-badge ' + (wordType === 'new' ? 'new-word' : 'review-word');
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
+        }
 
         document.getElementById('word-chinese').textContent = word.meaning;
         document.getElementById('word-pos').textContent = word.pos;
@@ -189,17 +321,39 @@ const App = {
         document.getElementById('speech-result').textContent = '';
         document.getElementById('speech-result').className = 'speech-result';
         document.getElementById('btn-next-step').classList.add('hidden');
+        document.getElementById('btn-skip-speech').classList.add('hidden');
 
         document.getElementById('spell-input').value = '';
+        document.getElementById('spell-input').classList.remove('input-error');
         document.getElementById('spell-result').textContent = '';
         document.getElementById('spell-result').className = 'spell-result';
 
-        this.showStep('step-meaning');
+        const mode = this.state.mode;
+        if (mode === 'spell') {
+            this.showStep('step-spell');
+            setTimeout(() => document.getElementById('spell-input').focus(), 100);
+        } else if (mode === 'speech') {
+            this.showStep('step-meaning');
+            document.getElementById('step-meaning-hint').textContent = '请大声读出这个单词的英文发音';
+            document.getElementById('btn-skip-speech').classList.remove('hidden');
+        } else {
+            this.showStep('step-meaning');
+            document.getElementById('step-meaning-hint').textContent = '请大声读出这个单词的英文发音';
+            document.getElementById('btn-skip-speech').classList.remove('hidden');
+        }
     },
 
     showStep(stepId) {
         document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
         document.getElementById(stepId).classList.add('active');
+    },
+
+    toggleSpeech() {
+        if (this.state.isRecording) {
+            this.stopSpeech();
+        } else {
+            this.startSpeech();
+        }
     },
 
     startSpeech() {
@@ -209,46 +363,77 @@ const App = {
         if (!SpeechRecognition) {
             document.getElementById('speech-result').textContent = '⚠️ 浏览器不支持语音识别，请使用Chrome浏览器';
             document.getElementById('speech-result').className = 'speech-result info';
-            document.getElementById('btn-next-step').classList.remove('hidden');
-            this.state.speechCorrect = true;
+            if (this.state.mode === 'both') {
+                document.getElementById('btn-next-step').classList.remove('hidden');
+            } else {
+                this.handleSpeechComplete(true);
+            }
             return;
+        }
+
+        if (this.state.recognition) {
+            try { this.state.recognition.abort(); } catch(e) {}
         }
 
         this.state.recognition = new SpeechRecognition();
         this.state.recognition.lang = this.state.lang;
         this.state.recognition.continuous = false;
         this.state.recognition.interimResults = false;
+        this.state.recognition.maxAlternatives = 3;
 
         this.state.recognition.onresult = (event) => {
-            const result = event.results[0][0].transcript.toLowerCase().trim();
+            this.clearSpeechTimeout();
             const word = this.state.sessionWords[this.state.currentWordIndex].word.toLowerCase();
+            let matched = false;
+            let bestResult = '';
+
+            for (let i = 0; i < event.results[0].length; i++) {
+                const result = event.results[0][i].transcript.toLowerCase().trim();
+                if (result === word || result.includes(word) || this.isSimilar(result, word)) {
+                    matched = true;
+                    bestResult = result;
+                    break;
+                }
+                if (!bestResult) bestResult = result;
+            }
+
             const confidence = event.results[0][0].confidence;
 
-            if (result.includes(word) || this.isSimilar(result, word)) {
-                document.getElementById('speech-result').textContent = `✅ 发音正确！识别到: "${result}" (置信度: ${Math.round(confidence * 100)}%)`;
+            if (matched) {
+                document.getElementById('speech-result').textContent = `✅ 发音正确！识别到: "${bestResult}"`;
                 document.getElementById('speech-result').className = 'speech-result success';
                 this.state.speechCorrect = true;
-                document.getElementById('btn-next-step').classList.remove('hidden');
+                this.handleSpeechComplete(true);
             } else {
-                document.getElementById('speech-result').textContent = `❌ 识别到: "${result}"，再试一次吧！`;
+                document.getElementById('speech-result').textContent = `❌ 识别到: "${bestResult}"，再试一次吧！`;
                 document.getElementById('speech-result').className = 'speech-result fail';
-                document.getElementById('btn-next-step').classList.remove('hidden');
+                document.getElementById('btn-skip-speech').classList.remove('hidden');
             }
+
+            this.state.isRecording = false;
+            document.getElementById('btn-speak').classList.remove('recording');
         };
 
         this.state.recognition.onerror = (event) => {
+            this.clearSpeechTimeout();
+            this.state.isRecording = false;
+            document.getElementById('btn-speak').classList.remove('recording');
+
             if (event.error === 'no-speech') {
-                document.getElementById('speech-result').textContent = '没有检测到语音，请再试一次';
+                document.getElementById('speech-result').textContent = '没有检测到语音，请再试一次或点击跳过';
             } else if (event.error === 'not-allowed') {
-                document.getElementById('speech-result').textContent = '⚠️ 请允许麦克风权限';
+                document.getElementById('speech-result').textContent = '⚠️ 请允许麦克风权限后重试';
+            } else if (event.error === 'aborted') {
+                return;
             } else {
                 document.getElementById('speech-result').textContent = '语音识别出错，可以跳过此步骤';
             }
             document.getElementById('speech-result').className = 'speech-result info';
-            document.getElementById('btn-next-step').classList.remove('hidden');
+            document.getElementById('btn-skip-speech').classList.remove('hidden');
         };
 
         this.state.recognition.onend = () => {
+            this.clearSpeechTimeout();
             this.state.isRecording = false;
             document.getElementById('btn-speak').classList.remove('recording');
         };
@@ -259,26 +444,69 @@ const App = {
             document.getElementById('btn-speak').classList.add('recording');
             document.getElementById('speech-result').textContent = '🎤 正在听...请大声读出单词';
             document.getElementById('speech-result').className = 'speech-result info';
+
+            this.state.speechTimeout = setTimeout(() => {
+                if (this.state.isRecording) {
+                    this.stopSpeech();
+                    document.getElementById('speech-result').textContent = '⏰ 语音识别超时，请再试一次或点击跳过';
+                    document.getElementById('speech-result').className = 'speech-result info';
+                    document.getElementById('btn-skip-speech').classList.remove('hidden');
+                }
+            }, 8000);
         } catch (e) {
             document.getElementById('speech-result').textContent = '语音识别启动失败，可以跳过';
             document.getElementById('speech-result').className = 'speech-result info';
-            document.getElementById('btn-next-step').classList.remove('hidden');
+            document.getElementById('btn-skip-speech').classList.remove('hidden');
+        }
+    },
+
+    clearSpeechTimeout() {
+        if (this.state.speechTimeout) {
+            clearTimeout(this.state.speechTimeout);
+            this.state.speechTimeout = null;
         }
     },
 
     stopSpeech() {
+        this.clearSpeechTimeout();
         if (this.state.recognition && this.state.isRecording) {
-            this.state.recognition.stop();
+            try { this.state.recognition.stop(); } catch(e) {}
             this.state.isRecording = false;
             document.getElementById('btn-speak').classList.remove('recording');
         }
     },
 
+    handleSpeechComplete(success) {
+        const mode = this.state.mode;
+        if (mode === 'speech') {
+            if (success) {
+                this.state.spellAttempts = 0;
+                setTimeout(() => this.showDetailStep(), 800);
+            } else {
+                document.getElementById('btn-skip-speech').classList.remove('hidden');
+            }
+        } else {
+            if (success) {
+                document.getElementById('btn-next-step').classList.remove('hidden');
+                document.getElementById('btn-skip-speech').classList.add('hidden');
+            } else {
+                document.getElementById('btn-skip-speech').classList.remove('hidden');
+            }
+        }
+    },
+
     isSimilar(spoken, target) {
         if (spoken.length < 2) return false;
+        if (spoken === target) return true;
         let matches = 0;
-        for (let i = 0; i < target.length; i++) {
-            if (spoken.includes(target[i])) matches++;
+        const targetChars = target.split('');
+        const spokenChars = spoken.split('');
+        for (let i = 0; i < targetChars.length; i++) {
+            const idx = spokenChars.indexOf(targetChars[i]);
+            if (idx !== -1) {
+                matches++;
+                spokenChars.splice(idx, 1);
+            }
         }
         return matches / target.length > 0.7;
     },
@@ -286,42 +514,71 @@ const App = {
     goToSpellStep() {
         this.stopSpeech();
         this.showStep('step-spell');
-        document.getElementById('spell-input').focus();
+        setTimeout(() => document.getElementById('spell-input').focus(), 100);
     },
 
     checkSpelling() {
         const word = this.state.sessionWords[this.state.currentWordIndex];
         const input = document.getElementById('spell-input').value.toLowerCase().trim();
         const correct = word.word.toLowerCase();
+        const spellInput = document.getElementById('spell-input');
+        const spellResult = document.getElementById('spell-result');
 
         if (!input) {
-            document.getElementById('spell-result').textContent = '请输入单词';
-            document.getElementById('spell-result').className = 'spell-result fail';
+            spellResult.textContent = '请输入单词';
+            spellResult.className = 'spell-result fail';
             return;
         }
 
+        this.state.spellAttempts++;
+
         if (input === correct) {
-            document.getElementById('spell-result').textContent = '✅ 拼写正确！';
-            document.getElementById('spell-result').className = 'spell-result success';
-            this.state.spellCorrect = true;
-            if (!this.state.hintUsed) this.state.sessionCorrect++;
+            spellResult.textContent = '✅ 拼写正确！';
+            spellResult.className = 'spell-result success';
+            spellInput.classList.remove('input-error');
+            this.state.sessionTotal++;
+            if (this.state.spellAttempts === 1 && !this.state.hintUsed) {
+                this.state.sessionCorrect++;
+            }
             this.state.totalAttempts++;
             this.state.totalCorrect++;
+            this.updateWordRecord(word.word, true);
 
             setTimeout(() => this.showDetailStep(), 800);
         } else {
-            document.getElementById('spell-result').textContent = `❌ 拼写不正确，正确答案: ${word.word}`;
-            document.getElementById('spell-result').className = 'spell-result fail';
+            spellInput.classList.add('input-error');
+            setTimeout(() => spellInput.classList.remove('input-error'), 500);
+
             this.state.totalAttempts++;
 
-            setTimeout(() => this.showDetailStep(), 1500);
+            if (this.state.spellAttempts >= 3) {
+                spellResult.innerHTML = `❌ 拼写不正确<br>正确答案: <strong>${word.word}</strong><br>请照着输入一次吧！`;
+                spellResult.className = 'spell-result fail';
+                spellInput.value = '';
+                spellInput.placeholder = word.word;
+                spellInput.focus();
+                this.state.spellAttempts = 99;
+            } else if (this.state.spellAttempts === 2) {
+                const hint = word.word[0] + '_'.repeat(word.word.length - 2) + word.word[word.word.length - 1];
+                spellResult.innerHTML = `❌ 再试一次！<br>💡 提示: ${hint} (${word.word.length}个字母)`;
+                spellResult.className = 'spell-result fail';
+                spellInput.value = '';
+                spellInput.focus();
+            } else {
+                spellResult.textContent = '❌ 拼写不正确，再试一次吧！';
+                spellResult.className = 'spell-result fail';
+                spellInput.value = '';
+                spellInput.focus();
+            }
+
+            this.updateWordRecord(word.word, false);
         }
     },
 
     showHint() {
         const word = this.state.sessionWords[this.state.currentWordIndex].word;
         const hint = word[0] + '_'.repeat(word.length - 2) + word[word.length - 1];
-        document.getElementById('spell-result').textContent = `💡 提示: ${hint} (${word.length}个字母)`;
+        document.getElementById('spell-result').innerHTML = `💡 提示: ${hint} (${word.length}个字母)`;
         document.getElementById('spell-result').className = 'spell-result info';
         this.state.hintUsed = true;
     },
@@ -343,7 +600,9 @@ const App = {
 
         const todayLog = this.getTodayLog();
         todayLog.words++;
-        todayLog.correct += this.state.spellCorrect ? 1 : 0;
+        if (this.state.spellAttempts === 1 && !this.state.hintUsed) {
+            todayLog.correct++;
+        }
         this.saveData();
 
         this.showStep('step-detail');
@@ -381,7 +640,7 @@ const App = {
     },
 
     completeSession() {
-        const elapsed = Math.round((Date.now() - this.state.sessionStartTime) / 60000);
+        const elapsed = Math.max(1, Math.round((Date.now() - this.state.sessionStartTime) / 60000));
         const todayLog = this.getTodayLog();
         todayLog.time += elapsed;
         this.saveData();
@@ -406,13 +665,31 @@ const App = {
         document.getElementById('setting-daily-count').textContent = this.state.dailyCount;
         this.saveData();
         this.updateUI();
+        this.updateEbbinghausInfo();
+    },
+
+    updateEbbinghausInfo() {
+        const infoEl = document.getElementById('ebbinghaus-info');
+        if (this.state.ebbinghaus) {
+            const newCount = this.getEbbinghausNewCount();
+            const reviewCount = this.getEbbinghausReviewCount();
+            document.getElementById('ebbinghaus-new').textContent = newCount;
+            document.getElementById('ebbinghaus-review').textContent = reviewCount;
+            document.getElementById('ebbinghaus-total').textContent = newCount + reviewCount;
+            infoEl.classList.remove('hidden');
+        } else {
+            infoEl.classList.add('hidden');
+        }
     },
 
     updateSettings() {
         document.getElementById('setting-daily-count').textContent = this.state.dailyCount;
+        document.getElementById('setting-mode').value = this.state.mode;
         document.getElementById('setting-lang').value = this.state.lang;
         document.getElementById('setting-rate').value = this.state.rate;
         document.getElementById('setting-rate-value').textContent = this.state.rate + 'x';
+        document.getElementById('setting-ebbinghaus').checked = this.state.ebbinghaus;
+        this.updateEbbinghausInfo();
     },
 
     updateStats() {

@@ -1,5 +1,139 @@
+const AuthService = {
+    STORAGE_KEY_USERS: 'toefl_junior_users',
+    STORAGE_KEY_SESSION: 'toefl_junior_session',
+    DATA_PREFIX: 'toefl_junior_data_',
+
+    getDataKey(userId) {
+        return this.DATA_PREFIX + userId;
+    },
+
+    getUsers() {
+        const raw = localStorage.getItem(this.STORAGE_KEY_USERS);
+        return raw ? JSON.parse(raw) : [];
+    },
+
+    saveUsers(users) {
+        localStorage.setItem(this.STORAGE_KEY_USERS, JSON.stringify(users));
+    },
+
+    getSession() {
+        const raw = localStorage.getItem(this.STORAGE_KEY_SESSION);
+        return raw ? JSON.parse(raw) : null;
+    },
+
+    saveSession(session) {
+        localStorage.setItem(this.STORAGE_KEY_SESSION, JSON.stringify(session));
+    },
+
+    clearSession() {
+        localStorage.removeItem(this.STORAGE_KEY_SESSION);
+    },
+
+    hashPassword(password) {
+        let hash = 0;
+        for (let i = 0; i < password.length; i++) {
+            const char = password.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+        }
+        return btoa('u' + hash + 'p' + password.length);
+    },
+
+    generateId() {
+        return 'u_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 6);
+    },
+
+    register(username, password) {
+        const trimmed = username.trim();
+        if (!trimmed || trimmed.length < 2 || trimmed.length > 16) {
+            return { success: false, error: '用户名需 2-16 个字符' };
+        }
+        if (!/^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(trimmed)) {
+            return { success: false, error: '用户名只能包含字母、数字、下划线或中文' };
+        }
+        if (!password || password.length < 4) {
+            return { success: false, error: '密码至少 4 个字符' };
+        }
+
+        const users = this.getUsers();
+        if (users.find(u => u.username === trimmed)) {
+            return { success: false, error: '该用户名已被注册' };
+        }
+
+        const newUser = {
+            id: this.generateId(),
+            username: trimmed,
+            passwordHash: this.hashPassword(password),
+            createdAt: new Date().toISOString()
+        };
+        users.push(newUser);
+        this.saveUsers(users);
+
+        this.saveSession({ userId: newUser.id, username: newUser.username, loginTime: Date.now() });
+        return { success: true, user: newUser };
+    },
+
+    login(username, password) {
+        const trimmed = username.trim();
+        if (!trimmed || !password) {
+            return { success: false, error: '请输入用户名和密码' };
+        }
+
+        const users = this.getUsers();
+        const user = users.find(u => u.username === trimmed);
+        if (!user) {
+            return { success: false, error: '用户名或密码错误' };
+        }
+        if (user.passwordHash !== this.hashPassword(password)) {
+            return { success: false, error: '用户名或密码错误' };
+        }
+
+        this.saveSession({ userId: user.id, username: user.username, loginTime: Date.now() });
+        return { success: true, user };
+    },
+
+    logout() {
+        this.clearSession();
+    },
+
+    getCurrentUser() {
+        const session = this.getSession();
+        if (!session) return null;
+        const users = this.getUsers();
+        return users.find(u => u.id === session.userId) || null;
+    },
+
+    migrateOldData() {
+        const oldKey = 'toefl_junior_data';
+        const oldData = localStorage.getItem(oldKey);
+        if (!oldData) return false;
+
+        const users = this.getUsers();
+        const existingUser = users.find(u => u.username === 'default_user');
+        if (existingUser) return false;
+
+        const newUser = {
+            id: this.generateId(),
+            username: 'default_user',
+            passwordHash: this.hashPassword('default'),
+            createdAt: new Date().toISOString()
+        };
+        users.push(newUser);
+        this.saveUsers(users);
+
+        const dataKey = this.getDataKey(newUser.id);
+        localStorage.setItem(dataKey, oldData);
+        localStorage.removeItem(oldKey);
+
+        this.saveSession({ userId: newUser.id, username: newUser.username, loginTime: Date.now() });
+        return true;
+    }
+};
+
 const App = {
     EBINGHAUS_INTERVALS: [1, 2, 4, 7, 15, 30],
+
+    currentUserId: null,
 
     state: {
         dailyCount: 10,
@@ -26,18 +160,59 @@ const App = {
         wordRecords: {}
     },
 
+    dataKey() {
+        return AuthService.getDataKey(this.currentUserId);
+    },
+
     init() {
-        this.loadData();
-        this.bindEvents();
-        this.updateUI();
-        if (speechSynthesis.onvoiceschanged !== undefined) {
-            speechSynthesis.onvoiceschanged = () => {};
+        const migrated = AuthService.migrateOldData();
+        const session = AuthService.getSession();
+
+        if (session) {
+            const user = AuthService.getCurrentUser();
+            if (user) {
+                this.currentUserId = user.id;
+                this.loadData();
+                this.bindEvents();
+                this.bindAuthEvents();
+                this.updateUI();
+                this.updateUserMenu(user);
+                document.getElementById('page-auth').classList.add('hidden');
+                document.getElementById('page-main').classList.remove('hidden');
+                if (speechSynthesis.onvoiceschanged !== undefined) {
+                    speechSynthesis.onvoiceschanged = () => {};
+                }
+                speechSynthesis.getVoices();
+                return;
+            }
         }
-        speechSynthesis.getVoices();
+
+        if (migrated) {
+            const user = AuthService.getCurrentUser();
+            this.currentUserId = user.id;
+            this.loadData();
+            this.bindEvents();
+            this.bindAuthEvents();
+            this.updateUI();
+            this.updateUserMenu(user);
+            document.getElementById('page-auth').classList.add('hidden');
+            document.getElementById('page-main').classList.remove('hidden');
+            if (speechSynthesis.onvoiceschanged !== undefined) {
+                speechSynthesis.onvoiceschanged = () => {};
+            }
+            speechSynthesis.getVoices();
+            return;
+        }
+
+        document.getElementById('page-auth').classList.remove('hidden');
+        document.getElementById('page-main').classList.add('hidden');
+        this.bindAuthEvents();
+        this.bindEvents();
     },
 
     loadData() {
-        const saved = localStorage.getItem('toefl_junior_data');
+        if (!this.currentUserId) return;
+        const saved = localStorage.getItem(this.dataKey());
         if (saved) {
             const data = JSON.parse(saved);
             this.state.dailyCount = data.dailyCount || 10;
@@ -54,7 +229,8 @@ const App = {
     },
 
     saveData() {
-        localStorage.setItem('toefl_junior_data', JSON.stringify({
+        if (!this.currentUserId) return;
+        localStorage.setItem(this.dataKey(), JSON.stringify({
             dailyCount: this.state.dailyCount,
             mode: this.state.mode,
             lang: this.state.lang,
@@ -114,7 +290,6 @@ const App = {
         const reviewWords = [];
         for (const [word, record] of Object.entries(this.state.wordRecords)) {
             if (!record.learnDate) continue;
-            const learnDate = new Date(record.learnDate);
             const nextReview = record.nextReview;
             if (nextReview && new Date(nextReview) <= today) {
                 const wordData = WORDS.find(w => w.word === word);
@@ -161,6 +336,142 @@ const App = {
             record.nextReview = next.toISOString().split('T')[0];
         }
         this.saveData();
+    },
+
+    bindAuthEvents() {
+        document.getElementById('btn-login').addEventListener('click', () => this.handleLogin());
+        document.getElementById('login-password').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') this.handleLogin();
+        });
+        document.getElementById('btn-register').addEventListener('click', () => this.handleRegister());
+        document.getElementById('register-confirm').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') this.handleRegister();
+        });
+        document.getElementById('btn-show-register').addEventListener('click', (e) => {
+            e.preventDefault();
+            document.getElementById('auth-login').classList.add('hidden');
+            document.getElementById('auth-register').classList.remove('hidden');
+            document.getElementById('auth-login-error').textContent = '';
+            document.getElementById('auth-register-error').textContent = '';
+        });
+        document.getElementById('btn-show-login').addEventListener('click', (e) => {
+            e.preventDefault();
+            document.getElementById('auth-register').classList.add('hidden');
+            document.getElementById('auth-login').classList.remove('hidden');
+            document.getElementById('auth-login-error').textContent = '';
+            document.getElementById('auth-register-error').textContent = '';
+        });
+
+        document.getElementById('btn-user-menu').addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggleUserDropdown();
+        });
+        document.getElementById('btn-switch-account').addEventListener('click', () => {
+            this.hideUserDropdown();
+            this.switchAccount();
+        });
+        document.getElementById('btn-logout').addEventListener('click', () => {
+            this.hideUserDropdown();
+            this.logout();
+        });
+        document.addEventListener('click', (e) => {
+            const dropdown = document.getElementById('user-dropdown');
+            const menu = document.getElementById('user-menu');
+            if (!dropdown.classList.contains('hidden') && !menu.contains(e.target)) {
+                this.hideUserDropdown();
+            }
+        });
+    },
+
+    handleLogin() {
+        const username = document.getElementById('login-username').value;
+        const password = document.getElementById('login-password').value;
+        const errorEl = document.getElementById('auth-login-error');
+
+        const result = AuthService.login(username, password);
+        if (result.success) {
+            this.currentUserId = result.user.id;
+            this.loadData();
+            document.getElementById('page-auth').classList.add('hidden');
+            document.getElementById('page-main').classList.remove('hidden');
+            this.updateUserMenu(result.user);
+            this.updateUI();
+            if (speechSynthesis.onvoiceschanged !== undefined) {
+                speechSynthesis.onvoiceschanged = () => {};
+            }
+            speechSynthesis.getVoices();
+        } else {
+            errorEl.textContent = result.error;
+        }
+    },
+
+    handleRegister() {
+        const username = document.getElementById('register-username').value;
+        const password = document.getElementById('register-password').value;
+        const confirm = document.getElementById('register-confirm').value;
+        const errorEl = document.getElementById('auth-register-error');
+
+        if (password !== confirm) {
+            errorEl.textContent = '两次密码输入不一致';
+            return;
+        }
+
+        const result = AuthService.register(username, password);
+        if (result.success) {
+            this.currentUserId = result.user.id;
+            this.loadData();
+            document.getElementById('page-auth').classList.add('hidden');
+            document.getElementById('page-main').classList.remove('hidden');
+            this.updateUserMenu(result.user);
+            this.updateUI();
+            if (speechSynthesis.onvoiceschanged !== undefined) {
+                speechSynthesis.onvoiceschanged = () => {};
+            }
+            speechSynthesis.getVoices();
+        } else {
+            errorEl.textContent = result.error;
+        }
+    },
+
+    logout() {
+        AuthService.logout();
+        this.currentUserId = null;
+        this.state = {
+            dailyCount: 10, mode: 'both', lang: 'en-US', rate: 0.9,
+            ebbinghaus: false, currentWordIndex: 0, sessionWords: [],
+            sessionWordTypes: [], sessionCorrect: 0, sessionTotal: 0,
+            sessionStartTime: null, speechCorrect: false, spellAttempts: 0,
+            hintUsed: false, recognition: null, isRecording: false,
+            speechTimeout: null, learnedWords: [], dailyLog: {},
+            totalCorrect: 0, totalAttempts: 0, wordRecords: {}
+        };
+        document.getElementById('page-main').classList.add('hidden');
+        document.getElementById('page-auth').classList.remove('hidden');
+        document.getElementById('auth-login').classList.remove('hidden');
+        document.getElementById('auth-register').classList.add('hidden');
+        document.getElementById('login-username').value = '';
+        document.getElementById('login-password').value = '';
+        document.getElementById('auth-login-error').textContent = '';
+        document.getElementById('auth-register-error').textContent = '';
+    },
+
+    switchAccount() {
+        this.logout();
+    },
+
+    updateUserMenu(user) {
+        document.getElementById('user-menu-name').textContent = user.username;
+        document.getElementById('dropdown-username').textContent = user.username;
+        document.getElementById('dropdown-userid').textContent = 'ID: ' + user.id;
+    },
+
+    toggleUserDropdown() {
+        const dropdown = document.getElementById('user-dropdown');
+        dropdown.classList.toggle('hidden');
+    },
+
+    hideUserDropdown() {
+        document.getElementById('user-dropdown').classList.add('hidden');
     },
 
     bindEvents() {
@@ -210,8 +521,8 @@ const App = {
             this.updateUI();
         });
         document.getElementById('btn-reset').addEventListener('click', () => {
-            if (confirm('确定要重置所有学习进度吗？此操作不可恢复！')) {
-                localStorage.removeItem('toefl_junior_data');
+            if (confirm('确定要重置当前用户的所有学习进度吗？此操作不可恢复！')) {
+                localStorage.removeItem(this.dataKey());
                 location.reload();
             }
         });
@@ -232,9 +543,7 @@ const App = {
         document.getElementById('total-time').textContent = this.getTotalTime();
 
         const todayLog = this.getTodayLog();
-        const totalTarget = this.state.ebbinghaus
-            ? this.state.dailyCount
-            : this.state.dailyCount;
+        const totalTarget = this.state.dailyCount;
         document.getElementById('today-target').textContent = totalTarget;
         document.getElementById('today-done').textContent = todayLog.words;
 
@@ -401,8 +710,6 @@ const App = {
                 if (!bestResult) bestResult = result;
             }
 
-            const confidence = event.results[0][0].confidence;
-
             if (matched) {
                 document.getElementById('speech-result').textContent = `✅ 发音正确！识别到: "${bestResult}"`;
                 document.getElementById('speech-result').className = 'speech-result success';
@@ -481,13 +788,9 @@ const App = {
     },
 
     handleSpeechComplete(success) {
-        const mode = this.state.mode;
-        if (mode === 'speech') {
+        if (this.state.mode === 'speech') {
             if (success) {
-                this.state.spellAttempts = 0;
-                setTimeout(() => this.showDetailStep(), 800);
-            } else {
-                document.getElementById('btn-skip-speech').classList.remove('hidden');
+                this.goToSpellStep();
             }
         } else {
             if (success) {
@@ -499,20 +802,20 @@ const App = {
         }
     },
 
-    isSimilar(spoken, target) {
-        if (spoken.length < 2) return false;
-        if (spoken === target) return true;
-        let matches = 0;
-        const targetChars = target.split('');
-        const spokenChars = spoken.split('');
-        for (let i = 0; i < targetChars.length; i++) {
-            const idx = spokenChars.indexOf(targetChars[i]);
-            if (idx !== -1) {
-                matches++;
-                spokenChars.splice(idx, 1);
+    isSimilar(result, word) {
+        if (result === word) return true;
+        const levenshtein = (a, b) => {
+            const matrix = [];
+            for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+            for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+            for (let i = 1; i <= b.length; i++) {
+                for (let j = 1; j <= a.length; j++) {
+                    matrix[i][j] = b[i-1] === a[j-1] ? matrix[i-1][j-1] : Math.min(matrix[i-1][j-1] + 1, matrix[i][j-1] + 1, matrix[i-1][j] + 1);
+                }
             }
-        }
-        return matches / target.length > 0.7;
+            return matrix[b.length][a.length];
+        };
+        return levenshtein(result, word) <= 1;
     },
 
     goToSpellStep() {
@@ -521,70 +824,59 @@ const App = {
         setTimeout(() => document.getElementById('spell-input').focus(), 100);
     },
 
-    checkSpelling() {
+    showHint() {
         const word = this.state.sessionWords[this.state.currentWordIndex];
-        const input = document.getElementById('spell-input').value.toLowerCase().trim();
-        const correct = word.word.toLowerCase();
-        const spellInput = document.getElementById('spell-input');
-        const spellResult = document.getElementById('spell-result');
-
-        if (!input) {
-            spellResult.textContent = '请输入单词';
-            spellResult.className = 'spell-result fail';
-            return;
-        }
-
-        this.state.spellAttempts++;
-
-        if (input === correct) {
-            spellResult.textContent = '✅ 拼写正确！';
-            spellResult.className = 'spell-result success';
-            spellInput.classList.remove('input-error');
-            this.state.sessionTotal++;
-            if (this.state.spellAttempts === 1 && !this.state.hintUsed) {
-                this.state.sessionCorrect++;
-            }
-            this.state.totalAttempts++;
-            this.state.totalCorrect++;
-            this.updateWordRecord(word.word, true);
-
-            setTimeout(() => this.showDetailStep(), 800);
+        const input = document.getElementById('spell-input');
+        const result = document.getElementById('spell-result');
+        this.state.hintUsed = true;
+        if (input.value.length < word.word.length) {
+            input.value = word.word.slice(0, input.value.length + 1);
+            result.textContent = `💡 提示: ${word.word.slice(0, input.value.length)}...`;
+            result.className = 'spell-result info';
         } else {
-            spellInput.classList.add('input-error');
-            setTimeout(() => spellInput.classList.remove('input-error'), 500);
-
-            this.state.totalAttempts++;
-
-            if (this.state.spellAttempts >= 3) {
-                spellResult.innerHTML = `❌ 拼写不正确<br>正确答案: <strong>${word.word}</strong><br>请照着输入一次吧！`;
-                spellResult.className = 'spell-result fail';
-                spellInput.value = '';
-                spellInput.placeholder = word.word;
-                spellInput.focus();
-                this.state.spellAttempts = 99;
-            } else if (this.state.spellAttempts === 2) {
-                const hint = word.word[0] + '_'.repeat(word.word.length - 2) + word.word[word.word.length - 1];
-                spellResult.innerHTML = `❌ 再试一次！<br>💡 提示: ${hint} (${word.word.length}个字母)`;
-                spellResult.className = 'spell-result fail';
-                spellInput.value = '';
-                spellInput.focus();
-            } else {
-                spellResult.textContent = '❌ 拼写不正确，再试一次吧！';
-                spellResult.className = 'spell-result fail';
-                spellInput.value = '';
-                spellInput.focus();
-            }
-
-            this.updateWordRecord(word.word, false);
+            result.textContent = `💡 提示: ${word.word}`;
+            result.className = 'spell-result info';
         }
     },
 
-    showHint() {
-        const word = this.state.sessionWords[this.state.currentWordIndex].word;
-        const hint = word[0] + '_'.repeat(word.length - 2) + word[word.length - 1];
-        document.getElementById('spell-result').innerHTML = `💡 提示: ${hint} (${word.length}个字母)`;
-        document.getElementById('spell-result').className = 'spell-result info';
-        this.state.hintUsed = true;
+    checkSpelling() {
+        const word = this.state.sessionWords[this.state.currentWordIndex];
+        const input = document.getElementById('spell-input');
+        const result = document.getElementById('spell-result');
+
+        this.state.spellAttempts++;
+
+        if (input.value.trim().toLowerCase() === word.word.toLowerCase()) {
+            result.textContent = '✅ 拼写正确！';
+            result.className = 'spell-result success';
+            input.classList.remove('input-error');
+            this.state.sessionCorrect++;
+            this.state.totalCorrect++;
+            this.state.totalAttempts++;
+            this.showDetailStep();
+            this.updateWordRecord(word.word, true);
+        } else {
+            const correctChars = this.countCorrectChars(input.value.trim().toLowerCase(), word.word.toLowerCase());
+            result.textContent = `❌ 拼写错误，请再试一次 (正确 ${correctChars}/${word.word.length} 个字母)`;
+            result.className = 'spell-result fail';
+            input.classList.add('input-error');
+            this.state.totalAttempts++;
+            this.updateWordRecord(word.word, false);
+            setTimeout(() => {
+                input.value = '';
+                input.focus();
+                input.classList.remove('input-error');
+            }, 1200);
+        }
+        this.saveData();
+    },
+
+    countCorrectChars(input, word) {
+        let count = 0;
+        for (let i = 0; i < Math.min(input.length, word.length); i++) {
+            if (input[i] === word[i]) count++;
+        }
+        return count;
     },
 
     showDetailStep() {
@@ -595,7 +887,7 @@ const App = {
         document.getElementById('detail-meaning').innerHTML = `<span style="color:#8b5cf6;font-weight:600">${word.pos}</span> ${word.meaning}`;
         document.getElementById('detail-collocation').innerHTML = word.collocation.split(' / ').map(c => `<span style="display:inline-block;background:#ede9fe;color:#6366f1;padding:3px 10px;border-radius:8px;margin:3px 2px;font-size:0.95rem">${c}</span>`).join('');
         document.getElementById('detail-grammar').innerHTML = word.grammar;
-        
+
         if (word.examples && word.examples.length > 0) {
             const examplesHtml = word.examples.map((ex, idx) => {
                 const highlightedEn = ex.en.replace(new RegExp(`\\b${word.word}\\b`, 'gi'), match => `<span style="color:#6366f1;font-weight:600">${match}</span>`);
@@ -717,6 +1009,13 @@ const App = {
         document.getElementById('setting-rate-value').textContent = this.state.rate + 'x';
         document.getElementById('setting-ebbinghaus').checked = this.state.ebbinghaus;
         this.updateEbbinghausInfo();
+
+        const user = AuthService.getCurrentUser();
+        if (user) {
+            document.getElementById('account-username').textContent = user.username;
+            document.getElementById('account-userid').textContent = user.id;
+            document.getElementById('account-created').textContent = new Date(user.createdAt).toLocaleDateString('zh-CN');
+        }
     },
 
     updateStats() {

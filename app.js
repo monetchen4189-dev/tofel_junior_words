@@ -27,45 +27,86 @@ const App = {
     },
 
     init() {
-        this.loadData();
-        this.bindEvents();
-        this.updateUI();
+        this.initAuth();
         if (speechSynthesis.onvoiceschanged !== undefined) {
             speechSynthesis.onvoiceschanged = () => {};
         }
         speechSynthesis.getVoices();
     },
 
+    initAuth() {
+        if (Auth.isLoggedIn()) {
+            this.showMainApp();
+            this.loadData();
+            this.bindEvents();
+            this.updateUI();
+            this.checkDataMigration();
+        } else {
+            this.showLoginPage();
+            this.bindAuthEvents();
+        }
+    },
+
+    showLoginPage() {
+        document.getElementById('login-page').classList.remove('hidden');
+        document.getElementById('main-app').classList.add('hidden');
+    },
+
+    showMainApp() {
+        document.getElementById('login-page').classList.add('hidden');
+        document.getElementById('main-app').classList.remove('hidden');
+        this.updateUserDisplay();
+    },
+
+    updateUserDisplay() {
+        const user = Auth.getCurrentUser();
+        if (user) {
+            document.getElementById('current-username').textContent = user.username;
+        }
+    },
+
+    checkDataMigration() {
+        const user = Auth.getCurrentUser();
+        if (user) {
+            const migrated = localStorage.getItem(`migration_done_${user.username}`);
+            if (!migrated) {
+                const hasOldData = Auth.migrateOldData(user.username);
+                if (hasOldData) {
+                    localStorage.setItem(`migration_done_${user.username}`, 'true');
+                    this.loadData();
+                    this.updateUI();
+                }
+            }
+        }
+    },
+
     loadData() {
-        const saved = localStorage.getItem('toefl_junior_data');
-        if (saved) {
-            const data = JSON.parse(saved);
-            this.state.dailyCount = data.dailyCount || 10;
-            this.state.mode = data.mode || 'both';
-            this.state.lang = data.lang || 'en-US';
-            this.state.rate = data.rate || 0.9;
-            this.state.ebbinghaus = data.ebbinghaus || false;
-            this.state.learnedWords = data.learnedWords || [];
-            this.state.dailyLog = data.dailyLog || {};
-            this.state.totalCorrect = data.totalCorrect || 0;
-            this.state.totalAttempts = data.totalAttempts || 0;
-            this.state.wordRecords = data.wordRecords || {};
+        const userData = Auth.getUserData();
+        if (userData) {
+            this.state.dailyCount = userData.settings?.dailyWordCount || 10;
+            this.state.mode = userData.settings?.checkInMode || 'both';
+            this.state.lang = 'en-US';
+            this.state.rate = 0.9;
+            this.state.ebbinghaus = userData.settings?.ebbinghausEnabled || false;
+            this.state.learnedWords = userData.learnedWords || [];
+            this.state.dailyLog = userData.dailyLogs || {};
+            this.state.totalCorrect = 0;
+            this.state.totalAttempts = 0;
+            this.state.wordRecords = userData.ebbinghausData || {};
         }
     },
 
     saveData() {
-        localStorage.setItem('toefl_junior_data', JSON.stringify({
-            dailyCount: this.state.dailyCount,
-            mode: this.state.mode,
-            lang: this.state.lang,
-            rate: this.state.rate,
-            ebbinghaus: this.state.ebbinghaus,
-            learnedWords: this.state.learnedWords,
-            dailyLog: this.state.dailyLog,
-            totalCorrect: this.state.totalCorrect,
-            totalAttempts: this.state.totalAttempts,
-            wordRecords: this.state.wordRecords
-        }));
+        const userData = Auth.getUserData() || {};
+        userData.learnedWords = this.state.learnedWords;
+        userData.dailyLogs = this.state.dailyLog;
+        userData.ebbinghausData = this.state.wordRecords;
+        userData.settings = {
+            dailyWordCount: this.state.dailyCount,
+            checkInMode: this.state.mode,
+            ebbinghausEnabled: this.state.ebbinghaus
+        };
+        Auth.saveUserData(userData);
     },
 
     getTodayKey() {
@@ -161,6 +202,71 @@ const App = {
             record.nextReview = next.toISOString().split('T')[0];
         }
         this.saveData();
+    },
+
+    bindAuthEvents() {
+        document.querySelectorAll('.login-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.login-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                
+                const tabName = tab.dataset.tab;
+                document.getElementById('login-form').classList.toggle('active', tabName === 'login');
+                document.getElementById('register-form').classList.toggle('active', tabName === 'register');
+            });
+        });
+
+        document.getElementById('btn-login').addEventListener('click', async () => {
+            const username = document.getElementById('login-username').value.trim();
+            const password = document.getElementById('login-password').value;
+            
+            const result = await Auth.login(username, password);
+            
+            if (result.success) {
+                this.showMainApp();
+                this.loadData();
+                this.bindEvents();
+                this.updateUI();
+                this.checkDataMigration();
+            } else {
+                const errorEl = document.getElementById('login-error');
+                errorEl.textContent = result.message;
+                errorEl.classList.remove('hidden');
+            }
+        });
+
+        document.getElementById('btn-register').addEventListener('click', async () => {
+            const username = document.getElementById('register-username').value.trim();
+            const password = document.getElementById('register-password').value;
+            const passwordConfirm = document.getElementById('register-password-confirm').value;
+            
+            if (password !== passwordConfirm) {
+                const errorEl = document.getElementById('register-error');
+                errorEl.textContent = '两次输入的密码不一致';
+                errorEl.classList.remove('hidden');
+                return;
+            }
+            
+            const result = await Auth.register(username, password);
+            
+            if (result.success) {
+                this.showMainApp();
+                this.loadData();
+                this.bindEvents();
+                this.updateUI();
+            } else {
+                const errorEl = document.getElementById('register-error');
+                errorEl.textContent = result.message;
+                errorEl.classList.remove('hidden');
+            }
+        });
+
+        document.getElementById('btn-logout').addEventListener('click', () => {
+            if (confirm('确定要退出登录吗？')) {
+                Auth.logout();
+                location.reload();
+            }
+        });
     },
 
     bindEvents() {

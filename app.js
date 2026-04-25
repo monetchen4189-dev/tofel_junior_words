@@ -2,7 +2,7 @@ const App = {
     state: {
         dailyCount: 10,
         lang: 'en-US',
-        rate: 0.8,
+        rate: 0.9,
         currentWordIndex: 0,
         sessionWords: [],
         sessionCorrect: 0,
@@ -18,6 +18,10 @@ const App = {
         this.loadData();
         this.bindEvents();
         this.updateUI();
+        if (speechSynthesis.onvoiceschanged !== undefined) {
+            speechSynthesis.onvoiceschanged = () => {};
+        }
+        speechSynthesis.getVoices();
     },
 
     loadData() {
@@ -349,8 +353,20 @@ const App = {
     speakWord() {
         const word = this.state.sessionWords[this.state.currentWordIndex].word;
         const utterance = new SpeechSynthesisUtterance(word);
-        utterance.lang = this.state.lang;
+        utterance.lang = 'en-US';
         utterance.rate = this.state.rate;
+        utterance.pitch = 1.0;
+        const voices = speechSynthesis.getVoices();
+        const preferred = ['Samantha', 'Google US English', 'Microsoft Zira', 'Alex', 'Karen', 'Victoria', 'Daniel', 'Google UK English Female', 'Tessa', 'Moira'];
+        let voice = null;
+        for (const name of preferred) {
+            voice = voices.find(v => v.name.includes(name) && v.lang.startsWith('en'));
+            if (voice) break;
+        }
+        if (!voice) {
+            voice = voices.find(v => v.lang === 'en-US') || voices.find(v => v.lang.startsWith('en'));
+        }
+        if (voice) utterance.voice = voice;
         speechSynthesis.cancel();
         speechSynthesis.speak(utterance);
     },

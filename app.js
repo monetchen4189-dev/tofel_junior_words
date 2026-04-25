@@ -592,10 +592,10 @@ const App = {
 
         document.getElementById('detail-word').textContent = word.word;
         document.getElementById('detail-phonetic').textContent = word.phonetic;
-        document.getElementById('detail-meaning').textContent = word.pos + ' ' + word.meaning;
-        document.getElementById('detail-collocation').textContent = word.collocation;
-        document.getElementById('detail-grammar').textContent = word.grammar;
-        document.getElementById('detail-example-en').textContent = word.example_en;
+        document.getElementById('detail-meaning').innerHTML = `<span style="color:#8b5cf6;font-weight:600">${word.pos}</span> ${word.meaning}`;
+        document.getElementById('detail-collocation').innerHTML = word.collocation.split(' / ').map(c => `<span style="display:inline-block;background:#ede9fe;color:#6366f1;padding:3px 10px;border-radius:8px;margin:3px 2px;font-size:0.95rem">${c}</span>`).join('');
+        document.getElementById('detail-grammar').innerHTML = word.grammar;
+        document.getElementById('detail-example-en').innerHTML = `<span style="color:#6366f1;font-weight:600">${word.word}</span>` + word.example_en.slice(word.word.length);
         document.getElementById('detail-example-cn').textContent = word.example_cn;
 
         if (!this.state.learnedWords.includes(word.word)) {

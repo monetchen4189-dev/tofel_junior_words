@@ -134,6 +134,8 @@ const App = {
     EBINGHAUS_INTERVALS: [1, 2, 4, 7, 15, 30],
 
     currentUserId: null,
+    currentWordBank: 'words1',
+    wordsLoaded: false,
 
     state: {
         dailyCount: 10,
@@ -161,7 +163,7 @@ const App = {
     },
 
     dataKey() {
-        return AuthService.getDataKey(this.currentUserId);
+        return AuthService.getDataKey(this.currentUserId) + '_' + this.currentWordBank;
     },
 
     init() {
@@ -172,17 +174,22 @@ const App = {
             const user = AuthService.getCurrentUser();
             if (user) {
                 this.currentUserId = user.id;
-                this.loadData();
-                this.bindEvents();
-                this.bindAuthEvents();
-                this.updateUI();
-                this.updateUserMenu(user);
-                document.getElementById('page-auth').classList.add('hidden');
-                document.getElementById('page-main').classList.remove('hidden');
-                if (speechSynthesis.onvoiceschanged !== undefined) {
-                    speechSynthesis.onvoiceschanged = () => {};
-                }
-                speechSynthesis.getVoices();
+                const savedBank = localStorage.getItem('toefl_junior_wordbank') || 'words1';
+                this.currentWordBank = savedBank;
+                this.loadWordBank(savedBank, () => {
+                    this.loadData();
+                    this.bindEvents();
+                    this.bindAuthEvents();
+                    this.updateUI();
+                    this.updateUserMenu(user);
+                    document.getElementById('page-auth').classList.add('hidden');
+                    document.getElementById('page-main').classList.remove('hidden');
+                    document.getElementById('word-bank-select').value = savedBank;
+                    if (speechSynthesis.onvoiceschanged !== undefined) {
+                        speechSynthesis.onvoiceschanged = () => {};
+                    }
+                    speechSynthesis.getVoices();
+                });
                 return;
             }
         }
@@ -190,17 +197,22 @@ const App = {
         if (migrated) {
             const user = AuthService.getCurrentUser();
             this.currentUserId = user.id;
-            this.loadData();
-            this.bindEvents();
-            this.bindAuthEvents();
-            this.updateUI();
-            this.updateUserMenu(user);
-            document.getElementById('page-auth').classList.add('hidden');
-            document.getElementById('page-main').classList.remove('hidden');
-            if (speechSynthesis.onvoiceschanged !== undefined) {
-                speechSynthesis.onvoiceschanged = () => {};
-            }
-            speechSynthesis.getVoices();
+            const savedBank = localStorage.getItem('toefl_junior_wordbank') || 'words1';
+            this.currentWordBank = savedBank;
+            this.loadWordBank(savedBank, () => {
+                this.loadData();
+                this.bindEvents();
+                this.bindAuthEvents();
+                this.updateUI();
+                this.updateUserMenu(user);
+                document.getElementById('page-auth').classList.add('hidden');
+                document.getElementById('page-main').classList.remove('hidden');
+                document.getElementById('word-bank-select').value = savedBank;
+                if (speechSynthesis.onvoiceschanged !== undefined) {
+                    speechSynthesis.onvoiceschanged = () => {};
+                }
+                speechSynthesis.getVoices();
+            });
             return;
         }
 
@@ -208,6 +220,33 @@ const App = {
         document.getElementById('page-main').classList.add('hidden');
         this.bindAuthEvents();
         this.bindEvents();
+    },
+
+    loadWordBank(bankName, callback) {
+        const existing = document.getElementById('word-bank-script');
+        if (existing) existing.remove();
+
+        window.WORDS = [];
+
+        const script = document.createElement('script');
+        script.id = 'word-bank-script';
+        script.src = bankName + '.js';
+        script.onload = () => {
+            this.wordsLoaded = true;
+            this.currentWordBank = bankName;
+            localStorage.setItem('toefl_junior_wordbank', bankName);
+            const countEl = document.getElementById('word-bank-count');
+            if (countEl && window.WORDS) {
+                countEl.textContent = window.WORDS.length + ' 词';
+            }
+            if (callback) callback();
+        };
+        script.onerror = () => {
+            console.error('Failed to load word bank:', bankName);
+            window.WORDS = [];
+            if (callback) callback();
+        };
+        document.head.appendChild(script);
     },
 
     loadData() {
@@ -526,6 +565,21 @@ const App = {
                 location.reload();
             }
         });
+
+        document.getElementById('word-bank-select').addEventListener('change', (e) => {
+            const newBank = e.target.value;
+            if (newBank !== this.currentWordBank) {
+                if (confirm('切换词库将加载新的单词集，当前词库的学习进度会保留。确定切换吗？')) {
+                    this.loadWordBank(newBank, () => {
+                        this.loadData();
+                        this.updateUI();
+                        this.updateStats();
+                    });
+                } else {
+                    e.target.value = this.currentWordBank;
+                }
+            }
+        });
     },
 
     switchPage(page) {
@@ -558,6 +612,11 @@ const App = {
 
         const pct = Math.min(100, Math.round((todayLog.words / totalTarget) * 100));
         document.getElementById('today-progress').style.width = pct + '%';
+
+        const countEl = document.getElementById('word-bank-count');
+        if (countEl && window.WORDS) {
+            countEl.textContent = window.WORDS.length + ' 词';
+        }
     },
 
     startSession() {
@@ -883,10 +942,10 @@ const App = {
         const word = this.state.sessionWords[this.state.currentWordIndex];
 
         document.getElementById('detail-word').textContent = word.word;
-        document.getElementById('detail-phonetic').textContent = word.phonetic;
+        document.getElementById('detail-phonetic').textContent = word.phonetic || '';
         document.getElementById('detail-meaning').innerHTML = `<span style="color:#8b5cf6;font-weight:600">${word.pos}</span> ${word.meaning}`;
-        document.getElementById('detail-collocation').innerHTML = word.collocation.split(' / ').map(c => `<span style="display:inline-block;background:#ede9fe;color:#6366f1;padding:3px 10px;border-radius:8px;margin:3px 2px;font-size:0.95rem">${c}</span>`).join('');
-        document.getElementById('detail-grammar').innerHTML = word.grammar;
+        document.getElementById('detail-collocation').innerHTML = word.collocation ? word.collocation.split(' / ').map(c => `<span style="display:inline-block;background:#ede9fe;color:#6366f1;padding:3px 10px;border-radius:8px;margin:3px 2px;font-size:0.95rem">${c}</span>`).join('') : '<span style="color:#94a3b8">—</span>';
+        document.getElementById('detail-grammar').innerHTML = word.grammar || '';
 
         if (word.examples && word.examples.length > 0) {
             const examplesHtml = word.examples.map((ex, idx) => {

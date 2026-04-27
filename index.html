@@ -94,6 +94,15 @@
                 <button class="nav-btn" data-page="stats">📊 统计</button>
                 <button class="nav-btn" data-page="settings">⚙️ 设置</button>
             </nav>
+            <div class="word-bank-bar">
+                <span class="word-bank-label">📖 词库：</span>
+                <select id="word-bank-select" class="word-bank-select">
+                    <option value="words1">小托福核心词汇1（A-G）</option>
+                    <option value="words2">小托福核心词汇2（H-P）</option>
+                    <option value="words3">小托福核心词汇3（Q-Z）</option>
+                </select>
+                <span class="word-bank-count" id="word-bank-count">0 词</span>
+            </div>
             <main class="app-main">
                 <section id="page-learn" class="page active">
                     <div id="learn-start" class="learn-start">
@@ -253,7 +262,6 @@
             </main>
         </div>
     </div>
-    <script src="words.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
